@@ -32,7 +32,7 @@ display(df)df
 ##test code
 
 ##Deleted the unnecessary columns
-
+##second test
 df2 = df.drop('Five Star Data Availability Code')\
         .drop('Chain Owned')\
         .drop('EQRS Date')\
