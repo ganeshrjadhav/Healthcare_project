@@ -64,3 +64,26 @@ df2 = df2.drop('Patient Survival data availability code')\
 df2.display()
 
 ##
+##
+##concating the address columns
+
+from pyspark.sql.functions import concat_ws
+
+df3 = df2.withColumn('Facility_Address', concat_ws(',','Address Line 1','Address Line 2','County/Parish','ZIP Code'))\
+         .drop('Address Line 1')\
+         .drop('Address Line 2')\
+         .drop('ZIP Code')\
+         .drop('County/Parish')
+
+df3.display()
+print(len(df3.columns))
+
+#Order by certification number
+
+df4 = df3.orderBy('Certification Number')
+df4.display()
+
+#reaname Network column
+
+df4 = df4.withColumnRenamed('Network', 'NO.of_chain_facilities')
+df4.display()
