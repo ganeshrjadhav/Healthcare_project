@@ -1,0 +1,181 @@
+--------------Glue Code import input From Data Catlog Database------------------
+
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+args = getResolvedOptions(sys.argv, ["JOB_NAME"],)
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args["JOB_NAME"], args)
+
+#read data from database in glue job----------
+
+dyf = glueContext.create_dynamic_frame.from_catalog(database="database_name", table_name="table_name", transformation_ctx="dyf")
+
+#convert dynamic dataframe into normal dataframe---------
+
+df=dyf.toDF()
+
+#transformation apply...............
+
+#store result in specific s3 bucket........
+
+df.coalesce(1).write.format("csv").option("header", "true").save("s3a://curatedbuck/{}".format(file_name.split('.')[0]))
+
+                                    or
+df.write.parquet('s3 bucket path')
+
+
+
+pipeline1:
+
+1)create s3 bucket and upload CSV file in it.
+	Bucket Name:batch6-0910
+	File Name:family.csv
+
+2)create IAM role for glue job with policies:
+	s3 fullaccess
+	cloudwatch full
+	Glue console full
+	Administrator Access
+rolename-s3_glue_lambda_role
+
+3)Create crawler in aws glue to crawl s3 bucket data.
+	Crawler Name:"batch6-0910-crawler"
+	input Source:"batch6-0910"
+	IAM role create and assign
+	Create Database and assign as destination.
+	Database Name :"batch6-0910-db"
+	Table Name :"batch6_0910"
+
+
+Run the crawler
+Goto Database in data catlog and check Data is available.
+
+
+4)Create Glue Job:
+select Spark Script Editor.
+JOb Details:
+Name:"batch 6-s3_data_crawl_job"
+IAM ROLE:"s3_glue_lambda_role"
+worker type:G1.X and G2.X   (G1.X-4VCPU and 16GB RAM , G2.X-8VCPU and 32GB RAM )
+Maximum number of workers:30
+Job bookmark: Enable (process only updated data)
+Number of retries:job failed automatically start job
+Job timeout (minutes): maximum (2880 minutes (48HRS)), 20 minutes
+Libraries:write path of s3 where library zip file stored.
+
+Code:
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+
+args = getResolvedOptions(sys.argv, ["JOB_NAME"],)
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args["JOB_NAME"], args)
+
+#read data from database in glue job----------
+
+dyf = glueContext.create_dynamic_frame.from_catalog(database="batch6-0910-db", table_name="batch6_0910", transformation_ctx="dyf")
+
+#convert dynamic dataframe into normal dataframe---------
+
+df=dyf.toDF()
+df1=df.withColumn("age_after_5_year",df.age+5)
+
+            
+output_path="s3://aws-batch6/family.csv"
+df1.write.option("header",True).option("inferSchema",True).mode('overwrite').parquet(output_path)
+
+
+
+
+Pipeline 2(Project Pipeline Part 1):
+S3 bucket data(RAW Bucket) fetch Process it and store to another S3 bucket(Output Bucket) using AWS Glue job:
+
+Prequiests:
+S3 bucket:Input bucket & Output Bucket
+
+Lambda Function:-start glue job
+IAM role:Policies:S3 Full Access
+		  Lambda Execution Role
+		  GlueConsole Full access
+		  Cloudwatch Full Access
+Triggers Set:
+	 S3 input Bucket(RAW Bucket)---All events
+
+
+lambda Code:
+import json
+import boto3
+
+
+def lambda_handler(event, context):
+    file_name = event['Records'][0]['s3']['object']['key']
+    bucketName=event['Records'][0]['s3']['bucket']['name']
+    print("File Name : ",file_name)
+    print("Bucket Name : ",bucketName)
+    glue=boto3.client('glue');
+    response = glue.start_job_run(JobName = "s3_glue_csv", Arguments={"--VAL1":file_name,"--VAL2":bucketName})
+    print("Lambda Invoke ")
+
+
+
+Glue job:Process data and store into output bucket
+IAM Role :Policies:S3 Full Access
+		  Lambda Execution Role
+		  GlueConsole Full access
+		  Cloudwatch Full Access
+		  Administrator Access
+
+GLue Job Code:
+
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from pyspark.sql.functions import *
+from pyspark.sql.types import *
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.getOrCreate()
+
+
+def main():
+    ## @params: [JOB_NAME]
+    args = getResolvedOptions(sys.argv, ["VAL1","VAL2"])
+    file_name=args['VAL1']
+    bucket_name=args['VAL2']
+    print("Bucket Name" , bucket_name)
+    print("File Name" , file_name)
+    
+    input_file_path="s3a://{}/{}".format(bucket_name,file_name)
+    print("Input File Path : ",input_file_path)
+    
+    df = spark.read.csv(input_file_path,header=True,inferSchema=True)
+  
+    df.coalesce(1).write.format("csv").option("header", "true").save("s3a://curatedbuck/{}")
+
+main()
+
+
+Run: Upload file in S3 input bucket.
+     Check Logs of Lambda FunCtion in Cloudwatch
+     Check Glue job status
+     check S3 output bucket
+
+
+
